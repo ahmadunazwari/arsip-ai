@@ -661,6 +661,17 @@ if not st.session_state.authenticated:
 # 5. SIDEBAR NAVIGASI
 # =========================================================
 
+# Terapkan navigasi yang diminta sebelum widget radio dibuat.
+# Pola ini mencegah StreamlitWidgetAlreadyInstantiatedError.
+_pending_page = st.session_state.pop("_pending_navigation", None)
+if _pending_page in {
+    "Dashboard",
+    "Upload & Proses AI",
+    "Repository Arsip",
+    "Tentang Sistem",
+}:
+    st.session_state["main_navigation"] = _pending_page
+
 with st.sidebar:
 
     st.markdown("## 📁 ARSIP.AI")
@@ -823,7 +834,7 @@ if page == "Dashboard":
             type="primary",
             key="dashboard_upload",
         ):
-            st.session_state["main_navigation"] = "Upload & Proses AI"
+            st.session_state["_pending_navigation"] = "Upload & Proses AI"
             st.rerun()
 
     st.divider()
@@ -1098,7 +1109,7 @@ elif page == "Upload & Proses AI":
                         st.success(
                             f"Arsip berhasil disimpan dengan ID #{archive_id}."
                         )
-                        st.session_state["main_navigation"] = "Repository Arsip"
+                        st.session_state["_pending_navigation"] = "Repository Arsip"
                         st.rerun()
                     else:
                         st.error(
