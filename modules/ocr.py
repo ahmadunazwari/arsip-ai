@@ -7,9 +7,9 @@ import pytesseract
 from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 
 
-TESSERACT_PATH = (
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-)
+# Lokasi Tesseract Windows dapat diatur melalui environment variable.
+# Pada Streamlit Cloud, lokasi akan ditemukan secara otomatis.
+TESSERACT_PATH = os.environ.get("TESSERACT_CMD", "")
 
 
 def configure_tesseract():
@@ -18,25 +18,42 @@ def configure_tesseract():
     candidates = [
         shutil.which("tesseract"),
         TESSERACT_PATH,
+        "/usr/bin/tesseract",
+        "/usr/local/bin/tesseract",
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
         r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
     ]
 
     for path in candidates:
-        if path and os.path.isfile(path):
-            pytesseract.pytesseract.tesseract_cmd = path
+        if not path:
+            continue
 
-            # Pastikan executable dapat dijalankan.
-            version = pytesseract.get_tesseract_version()
-            return path
+        # Jika hanya nama executable, cari melalui PATH.
+        resolved = shutil.which(path) if not os.path.isabs(path) else path
+
+        if not resolved or not os.path.isfile(resolved):
+            continue
+
+        try:
+            pytesseract.pytesseract.tesseract_cmd = resolved
+
+            # Pastikan executable benar-benar dapat dijalankan.
+            pytesseract.get_tesseract_version()
+
+            return resolved
+
+        except Exception:
+            continue
 
     raise RuntimeError(
-        "Tesseract OCR tidak ditemukan. "
-        "Periksa lokasi instalasi tesseract.exe."
+        "Tesseract OCR tidak ditemukan atau tidak dapat dijalankan. "
+        "Pada Streamlit Cloud, pastikan packages.txt berisi "
+        "'tesseract-ocr' dan aplikasi sudah selesai melakukan deployment."
     )
 
 
 def prepare_image(image):
-    """Meningkatkan keterbacaan gambar dokumen."""
+    """Meningkatkan keterbacaan gambar dokumen hasil pindai."""
 
     image = ImageOps.grayscale(image)
     image = ImageOps.autocontrast(image)
@@ -47,9 +64,15 @@ def prepare_image(image):
 
 
 def get_ocr_language():
-    """Memilih bahasa OCR yang tersedia."""
+    """Memilih bahasa OCR berdasarkan data yang tersedia."""
 
-    available = pytesseract.get_languages(config="")
+    try:
+        available = pytesseract.get_languages(config="")
+    except Exception as e:
+        raise RuntimeError(
+            "Gagal membaca data bahasa Tesseract. "
+            "Periksa instalasi Tesseract dan folder tessdata."
+        ) from e
 
     if "ind" in available and "eng" in available:
         return "ind+eng"
@@ -62,12 +85,13 @@ def get_ocr_language():
 
     raise RuntimeError(
         "Data bahasa OCR tidak ditemukan. "
-        "Pasang data bahasa eng atau ind."
+        "Pastikan paket tesseract-ocr-eng atau "
+        "tesseract-ocr-ind telah terpasang."
     )
 
 
 def ocr_pdf(pdf_path):
-    """Mengekstrak teks PDF hasil pindai menggunakan OCR."""
+    """Mengekstrak teks dari setiap halaman PDF hasil pindai."""
 
     configure_tesseract()
 
@@ -76,16 +100,17 @@ def ocr_pdf(pdf_path):
             f"File PDF tidak ditemukan: {pdf_path}"
         )
 
+    extracted_pages = []
+
     try:
         language = get_ocr_language()
-        extracted_pages = []
 
         with fitz.open(pdf_path) as pdf:
             if len(pdf) == 0:
                 raise ValueError("PDF tidak memiliki halaman.")
 
             for page_number, page in enumerate(pdf, start=1):
-                # Render pada resolusi 300 DPI.
+                # Render halaman dengan resolusi 300 DPI.
                 pix = page.get_pixmap(
                     matrix=fitz.Matrix(300 / 72, 300 / 72),
                     colorspace=fitz.csGRAY,
@@ -106,7 +131,7 @@ def ocr_pdf(pdf_path):
                     config="--oem 3 --psm 3",
                 )
 
-                # Alternatif tata letak jika hasil terlalu sedikit.
+                # Coba tata letak alternatif jika teks terlalu sedikit.
                 if len(text.strip()) < 40:
                     alternative = pytesseract.image_to_string(
                         image,
@@ -136,3 +161,4 @@ def ocr_pdf(pdf_path):
         raise RuntimeError(
             f"OCR gagal memproses PDF: {e}"
         ) from e
+
